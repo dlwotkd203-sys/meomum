@@ -8,36 +8,74 @@ window.Net = (() => {
 
   // ---------- Supabase ----------
   if (online) {
-    const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { realtime: { params: { eventsPerSecond: 20 } } });
-    const lobby = sb.channel(prefix + ':lobby', { config: { presence: { key: myId } } });
-    let lobbyReady = false, wantRoom = null;
-    lobby.on('presence', { event: 'sync' }, () => {
-      const st = lobby.presenceState(), counts = {}; let total = 0;
-      Object.values(st).forEach(arr => { const m = arr[arr.length - 1] || {}; total++; if (m.room) counts[m.room] = (counts[m.room] || 0) + 1; });
-      lobbyCb(counts, total);
-    }).subscribe(s => { if (s === 'SUBSCRIBED') { lobbyReady = true; lobby.track({ room: wantRoom }); } });
-
+    // worker: 백그라운드 탭에서도 하트비트가 늦춰지지 않게 Web Worker에서 돌림
+    const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      realtime: { params: { eventsPerSecond: 20 }, worker: true, heartbeatIntervalMs: 15000 }
+    });
+    let statusCb = () => {}, wantRoom = null, lobby = null, lobbyRetry = null, roomRetry = null;
     let trackTimer = null, lastTrack = 0;
+    const joined = ch => ch && ch.state === 'joined';
+    const BAD = ['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'];
+
+    // 로비: 끊기면 새로 만들어 다시 들어감
+    function openLobby() {
+      clearTimeout(lobbyRetry);
+      if (lobby) sb.removeChannel(lobby);
+      const ch = lobby = sb.channel(prefix + ':lobby', { config: { presence: { key: myId } } });
+      ch.on('presence', { event: 'sync' }, () => {
+        const st = ch.presenceState(), counts = {}; let total = 0;
+        Object.values(st).forEach(arr => { const m = arr[arr.length - 1] || {}; total++; if (m.room) counts[m.room] = (counts[m.room] || 0) + 1; });
+        lobbyCb(counts, total);
+      }).subscribe(s => {
+        if (ch !== lobby) return;
+        if (s === 'SUBSCRIBED') ch.track({ room: wantRoom });
+        else if (BAD.includes(s)) lobbyRetry = setTimeout(openLobby, 2000);
+      });
+    }
+    openLobby();
+
+    // 방: 끊기면 같은 방에 다시 들어가고 내 상태를 다시 알림
+    function openRoom() {
+      clearTimeout(roomRetry);
+      if (room) sb.removeChannel(room);
+      if (!roomId) return;
+      const ch = room = sb.channel(prefix + ':room:' + roomId, { config: { presence: { key: myId }, broadcast: { self: false } } });
+      const peers = () => { const st = ch.presenceState(), o = {}; Object.entries(st).forEach(([k, arr]) => { if (k !== myId && arr.length) o[k] = arr[arr.length - 1]; }); return o; };
+      ch.on('presence', { event: 'sync' }, () => ch === room && h && h.sync(peers()))
+        .on('broadcast', { event: 'ev' }, ({ payload }) => ch === room && h && payload && payload.id !== myId && h.event(payload))
+        .subscribe(s => {
+          if (ch !== room) return;
+          if (s === 'SUBSCRIBED') { ch.track(myState); statusCb(true); }
+          else if (BAD.includes(s)) { statusCb(false); roomRetry = setTimeout(openRoom, 2000); }
+        });
+    }
+
+    // 살아있음 확인: 주기적으로, 그리고 탭으로 돌아왔을 때 상태를 다시 보냄
+    function keepAlive() {
+      if (joined(lobby)) lobby.track({ room: wantRoom }); else if (lobby && lobby.state !== 'joining') openLobby();
+      if (roomId) { if (joined(room)) room.track(myState); else if (!room || room.state !== 'joining') openRoom(); }
+    }
+    setInterval(keepAlive, 20000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAlive(); });
+    window.addEventListener('online', keepAlive);
+
     var impl = {
-      setRoom(id) { wantRoom = id; if (lobbyReady) lobby.track({ room: id }); },
-      join(id, state, handlers) {
-        roomId = id; h = handlers; myState = state;
-        room = sb.channel(prefix + ':room:' + id, { config: { presence: { key: myId }, broadcast: { self: false } } });
-        const peers = () => { const st = room.presenceState(), o = {}; Object.entries(st).forEach(([k, arr]) => { if (k !== myId && arr.length) o[k] = arr[arr.length - 1]; }); return o; };
-        room.on('presence', { event: 'sync' }, () => h && h.sync(peers()))
-          .on('broadcast', { event: 'ev' }, ({ payload }) => h && payload && payload.id !== myId && h.event(payload))
-          .subscribe(s => { if (s === 'SUBSCRIBED') room.track(myState); });
-      },
+      setRoom(id) { wantRoom = id; if (joined(lobby)) lobby.track({ room: id }); },
+      join(id, state, handlers) { roomId = id; h = handlers; myState = state; openRoom(); },
       update(state) {
-        myState = state; if (!room) return;
-        const now = Date.now(), go = () => { lastTrack = Date.now(); room && room.track(myState); };
+        myState = state; if (!joined(room)) return;
+        const now = Date.now(), go = () => { lastTrack = Date.now(); joined(room) && room.track(myState); };
         clearTimeout(trackTimer);
         if (now - lastTrack > 400) go(); else trackTimer = setTimeout(go, 400);
       },
-      send(type, data) { room && room.send({ type: 'broadcast', event: 'ev', payload: { id: myId, type, ...data } }); },
-      leave() { clearTimeout(trackTimer); if (room) { room.untrack(); sb.removeChannel(room); } room = null; roomId = null; h = null; }
+      send(type, data) { joined(room) && room.send({ type: 'broadcast', event: 'ev', payload: { id: myId, type, ...data } }); },
+      leave() {
+        clearTimeout(trackTimer); clearTimeout(roomRetry);
+        const ch = room; room = null; roomId = null; h = null;
+        if (ch) { try { ch.untrack(); } catch (e) {} sb.removeChannel(ch); }
+      }
     };
-    return { myId, online, ...impl, onLobby(cb) { lobbyCb = cb; } };
+    return { myId, online, ...impl, onLobby(cb) { lobbyCb = cb; }, onStatus(cb) { statusCb = cb; } };
   }
 
   // ---------- 로컬 테스트 모드 (같은 브라우저의 탭끼리) ----------
@@ -66,6 +104,7 @@ window.Net = (() => {
 
   return {
     myId, online,
+    onStatus() {},
     onLobby(cb) { lobbyCb = cb; recompute(); },
     setRoom(id) { curRoom = id; beat(); recompute(); },
     join(id, state, handlers) { roomId = id; myState = state; h = handlers; beat(); recompute(); },

@@ -125,7 +125,21 @@
     document.title = '머묾 · 잠깐 머물다 가는 곳';
   }
 
-  function countRoom() { $('roomCount').textContent = ' · ' + (Object.keys(actors).length + 1) + '명 머무는 중'; }
+  let connOk = true;
+  function countRoom() {
+    const n = Object.values(actors).filter(a => !a.goneAt).length + 1;
+    $('roomCount').textContent = connOk ? ` · ${n}명 머무는 중` : ' · 다시 연결하는 중…';
+  }
+  Net.onStatus(ok => { connOk = ok; if (place) countRoom(); });
+  setInterval(() => {
+    if (!place) return;
+    let changed = false;
+    Object.keys(actors).forEach(id => {
+      const a = actors[id];
+      if (a.goneAt && Date.now() - a.goneAt > 5000) { line(`'${a.name}'님이 떠났어요`, null, true); removeActor(id); changed = true; }
+    });
+    if (changed) countRoom();
+  }, 1000);
 
   function onSync(peers) {
     if (!place) return;
@@ -140,7 +154,12 @@
         if (Date.now() - a.lastMove > 1500) { a.tx = s.tx ?? a.tx; a.ty = s.ty ?? a.ty; }
       }
     });
-    Object.keys(actors).forEach(id => { if (!peers[id]) { if (synced) line(`'${actors[id].name}'님이 떠났어요`, null, true); removeActor(id); } });
+    // 잠깐 끊겼다 돌아오는 경우가 있어서 5초 기다렸다가 떠난 것으로 처리
+    Object.keys(actors).forEach(id => {
+      const a = actors[id];
+      if (peers[id]) { a.goneAt = 0; a.el.style.opacity = ''; return; }
+      if (!a.goneAt) { a.goneAt = Date.now(); a.el.style.opacity = '.45'; }
+    });
     if (!synced) {
       synced = true;
       const taken = new Set(Object.values(actors).map(a => a.name));
@@ -177,7 +196,8 @@
     moveTo((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H);
   });
   document.addEventListener('keydown', e => {
-    if (!place || document.activeElement === $('chatInput')) return;
+    if (!place) return;
+    if (document.activeElement === $('chatInput')) { if (e.key === 'Escape') $('chatInput').blur(); return; }
     const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1], a: [-1, 0], d: [1, 0], w: [0, -1], s: [0, 1] }[e.key];
     if (d) { e.preventDefault(); moveTo(me.x + d[0] * 26, me.y + d[1] * 14); }
     else if (e.key === 'Enter') { e.preventDefault(); $('chatInput').focus(); }
@@ -187,9 +207,11 @@
   $('chatForm').addEventListener('submit', e => {
     e.preventDefault();
     const inp = $('chatInput'), t = inp.value.replace(/\s+/g, ' ').trim().slice(0, 60);
-    if (!t || !me) return;
+    // 엔터로 보내고 나면 다시 캐릭터 조종으로 (터치 기기는 키보드가 계속 열려 있게 둠)
+    const backToMove = () => { if (!matchMedia('(pointer: coarse)').matches) inp.blur(); };
+    if (!t || !me) { inp.blur(); return; }
     if (Date.now() - lastChat < 900) return;
-    lastChat = Date.now(); inp.value = '';
+    lastChat = Date.now(); inp.value = ''; backToMove();
     say(me, t); line(t, me.name);
     Net.send('chat', { text: t, n: me.name });
   });
