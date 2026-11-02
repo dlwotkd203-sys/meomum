@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>머묾 · 잠깐 머물다 가는 곳</title>
+<meta name="description" content="바다, 산, 들판, 공원, 새벽 옥상, 클럽. 있고 싶은 곳을 골라 들어가면 그곳의 소리와 그곳에 있는 사람들이 있어요.">
+<meta name="theme-color" content="#0e0f1d">
+<meta property="og:title" content="머묾 · 지금, 어디에 있고 싶어요?">
+<meta property="og:description" content="있고 싶은 곳을 골라 들어가면 그곳의 소리와 그곳에 있는 사람들이 있어요.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="lobby" class="screen">
+  <header class="lobby-head">
+    <h1>머묾</h1>
+    <p class="tag">지금, 어디에 있고 싶어요?</p>
+    <p class="online"><span id="onlineTotal">0</span>명이 어딘가에 머물고 있어요</p>
+  </header>
+  <div id="placeGrid" class="grid"></div>
+  <footer class="lobby-foot"><span id="modeBadge"></span>소리가 나와요. 이어폰을 추천해요.</footer>
+</div>
+
+<div id="room" class="screen hidden">
+  <div class="topbar">
+    <button id="btnBack" class="icon-btn" aria-label="나가기">←</button>
+    <div class="room-title"><b id="roomName"></b><span id="roomCount"></span></div>
+    <button id="btnMute" class="icon-btn" aria-label="소리 켜기/끄기">🔊</button>
+    <input id="vol" type="range" min="0" max="100" value="70" aria-label="볼륨">
+  </div>
+  <div id="stageWrap">
+    <div id="stageBox">
+      <canvas id="stage"></canvas>
+      <div id="overlay"></div>
+    </div>
+    <div id="chatLog" class="chatlog"></div>
+  </div>
+  <div class="bottombar">
+    <button id="btnAction" class="pill"></button>
+    <div class="emotes">
+      <button data-emote="👋" aria-label="인사">👋</button>
+      <button data-emote="😊" aria-label="미소">😊</button>
+      <button data-emote="🫶" aria-label="하트">🫶</button>
+      <button data-emote="😴" aria-label="졸림">😴</button>
+    </div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" maxlength="60" placeholder="한마디 남기기 (Enter)">
+      <button type="submit" class="pill send">보내기</button>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/places.js"></script>
+<script src="js/net.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
