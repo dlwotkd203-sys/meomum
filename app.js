@@ -196,7 +196,8 @@
     moveTo((e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H);
   });
   document.addEventListener('keydown', e => {
-    if (!place || document.activeElement === $('chatInput')) return;
+    if (!place) return;
+    if (document.activeElement === $('chatInput')) { if (e.key === 'Escape') $('chatInput').blur(); return; }
     const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1], a: [-1, 0], d: [1, 0], w: [0, -1], s: [0, 1] }[e.key];
     if (d) { e.preventDefault(); moveTo(me.x + d[0] * 26, me.y + d[1] * 14); }
     else if (e.key === 'Enter') { e.preventDefault(); $('chatInput').focus(); }
@@ -206,9 +207,11 @@
   $('chatForm').addEventListener('submit', e => {
     e.preventDefault();
     const inp = $('chatInput'), t = inp.value.replace(/\s+/g, ' ').trim().slice(0, 60);
-    if (!t || !me) return;
+    // 엔터로 보내고 나면 다시 캐릭터 조종으로 (터치 기기는 키보드가 계속 열려 있게 둠)
+    const backToMove = () => { if (!matchMedia('(pointer: coarse)').matches) inp.blur(); };
+    if (!t || !me) { inp.blur(); return; }
     if (Date.now() - lastChat < 900) return;
-    lastChat = Date.now(); inp.value = '';
+    lastChat = Date.now(); inp.value = ''; backToMove();
     say(me, t); line(t, me.name);
     Net.send('chat', { text: t, n: me.name });
   });
